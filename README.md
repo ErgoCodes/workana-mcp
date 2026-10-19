@@ -1,73 +1,89 @@
 # workana-mcp
 
-Servidor MCP para **buscar y evaluar proyectos freelance de Workana** desde Claude.
+An MCP server that lets Claude **find and score freelance projects on Workana**, so you spend your time on proposals that can actually win.
 
-Workana no tiene API pública, así que el servidor lee las mismas páginas públicas que ves en el navegador **sin iniciar sesión**. Es **solo lectura**: no entra en tu cuenta, no envía propuestas ni mensajes. Tú decides a qué postularte y envías la propuesta a mano.
+## Why I built it
 
-## Herramientas
+Most Workana projects are a poor fit: dozens of proposals already in, tiny budgets, clients who never paid anyone, or requests to move the conversation to WhatsApp. Checking each one by hand every day took longer than writing the proposals. This tool does the filtering and tells me which handful are worth my time.
 
-| Herramienta | Qué hace |
+It is **read-only by design**. Workana has no public API, so the server reads the same public pages you see in the browser **without logging in**. It never touches your account, never sends proposals or messages. You decide where to apply and send the proposal yourself.
+
+## Tools
+
+| Tool | What it does |
 |---|---|
-| `workana_buscar_proyectos` | Búsqueda con filtros: texto, skills, categoría/subcategoría, idioma, precio fijo o por hora, antigüedad (24h/3d/semana), solo con pocas propuestas, país del cliente, presupuesto mínimo, tarifa mínima, máximo de propuestas. Ordena por oportunidad, por fecha o por menos propuestas. |
-| `workana_ver_proyecto` | Ficha completa: descripción entera, skills, presupuesto, propuestas, freelancers interesados y el cliente (país, estrellas, proyectos publicados y pagados, miembro desde, pago verificado, otros proyectos suyos). |
-| `workana_evaluar_proyecto` | Puntaje de oportunidad 0-100 con desglose, alertas, puntos a favor y en contra, y consejos para la propuesta. |
-| `workana_mejores_oportunidades` | Flujo diario: busca proyectos recientes de tu stack, descarta los malos, analiza a fondo los mejores N y los ordena. |
+| `workana_buscar_proyectos` | Search with filters: text, skills, category/subcategory, language, fixed price or hourly, age (24h/3d/week), few proposals only, client country, minimum budget, minimum rate, maximum proposals. Sort by opportunity, date or fewest proposals. |
+| `workana_ver_proyecto` | Full project page: complete description, skills, budget, proposals, interested freelancers and the client (country, rating, projects posted and paid, member since, verified payment, their other projects). |
+| `workana_evaluar_proyecto` | Opportunity score 0–100 with a breakdown, alerts, pros and cons, and tips for the proposal. |
+| `workana_mejores_oportunidades` | Daily workflow: searches recent projects for your stack, drops the bad ones, deep-analyzes the best N and ranks them. |
 
-### Cómo se calcula el puntaje (0-100)
+### How the score (0–100) works
 
-- **Encaje con tu stack (30):** tecnologías fuertes (React, Node, TypeScript, Next, Express, Nest) en los skills o en el texto, más el % de skills del proyecto que tienes.
-- **Competencia (25):** 0-4 propuestas = 25 … 35+ = 2.
-- **Presupuesto (20):** precio fijo (≥ 1000 USD = 20) o tarifa por hora (≥ 45 USD/h = 20).
-- **Cliente (15):** pago verificado, calificación, proyectos que ya pagó y cuántos publicó.
-- **Frescura (10):** menos de 6 h = 10 … más de una semana = 0.
-- **Penalizaciones:** pagar o trabajar fuera de Workana, contacto por WhatsApp o Telegram, e-mail en la descripción, prueba gratis, pago con porcentaje o participación, presupuesto "bajo", "clones" de plataformas grandes, proyecto cerrado.
+- **Stack fit (30):** strong technologies (React, Node, TypeScript, Next, Express, Nest) in the skills or text, plus the % of the project's skills you have.
+- **Competition (25):** 0–4 proposals = 25 … 35+ = 2.
+- **Budget (20):** fixed price (≥ 1,000 USD = 20) or hourly rate (≥ 45 USD/h = 20).
+- **Client (15):** verified payment, rating, projects already paid and how many they posted.
+- **Freshness (10):** under 6 h = 10 … over a week = 0.
+- **Penalties:** paying or working outside Workana, contact via WhatsApp or Telegram, email in the description, free trial work, payment in equity or percentage, "low" budget, clones of big platforms, closed project.
 
-Prioridad: **alta** a partir de 65, **media** de 45 a 64, **baja** por debajo de 45. Es una heurística para priorizar, no una garantía.
+Priority: **high** from 65, **medium** 45–64, **low** below 45. It's a heuristic to prioritize, not a guarantee.
 
-### Tu perfil
+## The interesting problem: results Workana hides
 
-Por defecto se usa un stack fullstack: React.js, Node.js, TypeScript, JavaScript, Next.js, Express.js, NestJS, HTML/CSS, API/REST, MongoDB, MySQL/SQL, Git y Firebase. Tienes dos formas de cambiarlo:
+Logged out, Workana only shows **7 of every 20** results per page and hides the rest to push you to sign up. Instead of logging in (which would put an account at risk), the server notices when a search has hidden results and **splits it into narrower searches** (by pricing model, number of proposals, subcategory, skill and, as a last resort, more pages), then merges and de-duplicates the results. `max_consultas` (default 20, max 30) caps how many requests that costs, and the response says how many projects it saw out of the total Workana reports.
 
-- Por consulta, con el parámetro `mis_skills`.
-- De forma permanente, con la variable `WORKANA_MIS_SKILLS` en la configuración (lista separada por comas).
+The same idea fills another gap: a logged-out project page doesn't show the budget or verified payment, so the server finds the project in the listings by title and fills those fields in.
 
-## Instalación (Linux)
+Requests go through `curl_cffi` (presenting as Chrome), wait 1.5 s between calls and are cached for 5 minutes.
 
-La carpeta ya está en `~/Documents/mcp/workana-mcp`. Registra el lanzador `run.sh` en Claude Desktop, igual que el de OLX. La primera vez instala las dependencias solo, en `.venv`, y deja el registro en `install.log`.
+## Your profile
 
-1. Claude Desktop → **Configuración → Desarrollador → Editar configuración**.
-2. Dentro de `"mcpServers"`, junto a `"olx-aluguel"`, agrega:
+By default it scores against a fullstack stack: React.js, Node.js, TypeScript, JavaScript, Next.js, Express.js, NestJS, HTML/CSS, API/REST, MongoDB, MySQL/SQL, Git and Firebase. Two ways to change it:
+
+- Per query, with the `mis_skills` parameter.
+- Permanently, with the `WORKANA_MIS_SKILLS` variable in the server config (comma-separated).
+
+## Install (Linux)
+
+Register the `run.sh` launcher in Claude Desktop. On first run it installs its dependencies into `.venv` and logs to `install.log`.
+
+1. Claude Desktop → **Settings → Developer → Edit config**.
+2. Inside `"mcpServers"`, add:
 
 ```json
 "workana": {
   "command": "bash",
-  "args": ["/RUTA/A/workana-mcp/run.sh"]
+  "args": ["/PATH/TO/workana-mcp/run.sh"]
 }
 ```
 
-   Opcional, para cambiar tu perfil de skills:
+   Optionally, set your skills profile:
 
 ```json
 "workana": {
   "command": "bash",
-  "args": ["/RUTA/A/workana-mcp/run.sh"],
+  "args": ["/PATH/TO/workana-mcp/run.sh"],
   "env": { "WORKANA_MIS_SKILLS": "React.js,Node.js,TypeScript,Next.js,NestJS,PostgreSQL,Docker" }
 }
 ```
 
-3. Reinicia Claude Desktop por completo. La primera vez tarda uno o dos minutos mientras instala. Si no aparecen las herramientas `workana_*`, revisa `install.log`.
+3. Fully restart Claude Desktop. The first start takes a minute or two while it installs. If the `workana_*` tools don't show up, check `install.log`.
 
-## Ejemplos (en Claude)
+## Example prompts
 
-- "Dame las mejores oportunidades de Workana de hoy para mi stack."
-- "Busca proyectos de React o Next de precio fijo, publicados en las últimas 24 horas, con pocas propuestas."
-- "Evalúa este proyecto: https://www.workana.com/job/…"
-- "Busca proyectos por hora de Node.js con tarifa de al menos 20 USD/h y clientes de España o EE. UU."
+- "Give me today's best Workana opportunities for my stack."
+- "Find fixed-price React or Next projects posted in the last 24 hours with few proposals."
+- "Evaluate this project: https://www.workana.com/job/…"
+- "Find hourly Node.js projects paying at least 20 USD/h from clients in Spain or the US."
 
-## Notas y limitaciones
+> The tool's output is in Spanish, its author's first language.
 
-- Sin sesión, Workana solo muestra **7 de cada 20** resultados por página (el resto lo oculta para que te registres). Para verlos todos, cuando una búsqueda tiene resultados ocultos el servidor la divide en búsquedas más pequeñas (modalidad, número de propuestas, subcategoría, skill y, como último recurso, más páginas) y une los resultados. `max_consultas` (20 por defecto, 30 como máximo) limita cuántas peticiones hace. La respuesta dice cuántos proyectos vio del total que reporta Workana.
-- La página de un proyecto sin sesión no muestra presupuesto ni pago verificado. El servidor los completa buscando el proyecto en el listado por su título.
-- El servidor usa `curl_cffi` (se presenta como Chrome), espera 1,5 s entre peticiones y guarda caché 5 minutos. Si Workana bloquea las consultas, espera unos minutos y usa menos páginas.
-- Si Workana cambia su web, habrá que ajustar `parsers.py`. Los tests (`.venv/bin/python tests/test_all.py`) usan respuestas reales guardadas y ayudan a detectarlo.
-- Es para **uso personal** y con pocas consultas. No lo uses para recolectar datos de forma masiva ni para automatizar el envío de propuestas: va contra los términos de Workana y pone en riesgo tu cuenta.
+## Limitations
+
+- If Workana blocks requests, wait a few minutes and use fewer pages.
+- If Workana changes its site, `parsers.py` needs updating. The tests (`.venv/bin/python tests/test_all.py`) run against saved real responses and catch it.
+- **Personal use, low volume.** Don't use it to scrape at scale or to automate sending proposals: that violates Workana's terms and puts your account at risk.
+
+## License
+
+MIT
